@@ -364,7 +364,7 @@ defmodule CurlReq.Curl do
 
           :req ->
             [
-              header_flag(flag_style, ["accept-encoding: ", Atom.to_string(request.compression)])
+              header_flag(flag_style, ["accept-encoding: ", accept_encoding_value(request)])
             ]
         end
       end)
@@ -485,6 +485,12 @@ defmodule CurlReq.Curl do
   defp netrc_file_flag(_, value), do: [" --netrc-file ", escape(value)]
 
   defp compressed_flag(_), do: " --compressed"
+
+  defp accept_encoding_value(%CurlReq.Request{accept_encodings: [], compression: compression}),
+    do: Atom.to_string(compression)
+
+  defp accept_encoding_value(%CurlReq.Request{accept_encodings: encodings}),
+    do: Enum.map_join(encodings, ", ", &Atom.to_string/1)
 
   defp proxy_flag(:short, value), do: [" -x ", escape(value)]
   defp proxy_flag(:long, value), do: [" --proxy ", escape(value)]

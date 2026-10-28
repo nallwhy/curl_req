@@ -11,6 +11,7 @@ defmodule CurlReq.Request do
   @callback decode(__MODULE__.t(), opts :: Keyword.t()) :: term()
 
   @protocols [:http1_0, :http1_1, :http2]
+  @content_codings [:gzip, :br, :zstd]
 
   @type t() :: %__MODULE__{
           user_agent: user_agent(),
@@ -19,6 +20,7 @@ defmodule CurlReq.Request do
           method: method(),
           url: URI.t(),
           compression: compression(),
+          accept_encodings: [content_coding()],
           redirect: boolean(),
           proxy: boolean(),
           proxy_auth: auth(),
@@ -37,7 +39,8 @@ defmodule CurlReq.Request do
   @type auth_option() :: :none | :basic | :bearer | :netrc
   @type encoding() :: :raw | :form | :json
   @type method() :: :get | :head | :put | :post | :delete | :patch
-  @type compression() :: :none | :gzip | :br | :zstd
+  @type compression() :: :none | content_coding()
+  @type content_coding() :: :gzip | :br | :zstd
   @type protocols() :: :http1_0 | :http1_1 | :http2
 
   @derive {Inspect, except: [:auth]}
@@ -47,6 +50,7 @@ defmodule CurlReq.Request do
             method: :get,
             url: URI.parse(""),
             compression: :none,
+            accept_encodings: [],
             redirect: false,
             proxy: false,
             proxy_url: URI.parse(""),
@@ -92,9 +96,11 @@ defmodule CurlReq.Request do
       {"authorization", ["Basic " <> userinfo]} ->
         %{request | auth: {:basic, userinfo}}
 
-      {"accept-encoding", [compression | _]}
-      when compression in ["gzip", "br", "zstd"] ->
-        put_compression(request, String.to_existing_atom(compression))
+      {"accept-encoding", val} ->
+        case parse_accept_encodings(val) do
+          {:ok, encodings} -> put_compression(request, encodings)
+          :error -> put_raw_header(request, key, val)
+        end
 
       {"content-type", ["application/json" <> _]} ->
         %{request | encoding: :json}
@@ -116,8 +122,28 @@ defmodule CurlReq.Request do
         end)
 
       {key, val} ->
-        headers = Map.put(request.headers, key, val)
-        %{request | headers: headers}
+        put_raw_header(request, key, val)
+    end
+  end
+
+  defp put_raw_header(request, key, val) do
+    %{request | headers: Map.put(request.headers, key, val)}
+  end
+
+  # Only take over the header when every listed coding is one we can express,
+  # so values like "gzip, deflate" or "gzip;q=1.0" stay untouched.
+  defp parse_accept_encodings(values) do
+    codings =
+      values
+      |> Enum.flat_map(&String.split(&1, ","))
+      |> Enum.map(&String.trim/1)
+
+    supported = Enum.map(@content_codings, &Atom.to_string/1)
+
+    if codings != [] and Enum.all?(codings, &(&1 in supported)) do
+      {:ok, Enum.map(codings, &String.to_existing_atom/1)}
+    else
+      :error
     end
   end
 
@@ -395,19 +421,27 @@ defmodule CurlReq.Request do
       iex> request.compression
       :br
   """
-  @spec put_compression(__MODULE__.t(), compression() | boolean() | nil) :: __MODULE__.t()
+  @spec put_compression(__MODULE__.t(), compression() | [content_coding()] | boolean() | nil) ::
+          __MODULE__.t()
   def put_compression(%__MODULE__{} = request, nil), do: request
 
-  def put_compression(%__MODULE__{} = request, true) do
-    %{request | compression: :gzip}
+  def put_compression(%__MODULE__{compression: :none} = request, true) do
+    put_compression(request, :gzip)
   end
+
+  def put_compression(%__MODULE__{} = request, true), do: request
 
   def put_compression(%__MODULE__{} = request, false) do
-    %{request | compression: :none}
+    %{request | compression: :none, accept_encodings: []}
   end
 
-  def put_compression(%__MODULE__{} = request, type) when type in [:gzip, :br, :zstd] do
-    %{request | compression: type}
+  def put_compression(%__MODULE__{} = request, type) when type in @content_codings do
+    put_compression(request, [type])
+  end
+
+  def put_compression(%__MODULE__{} = request, [type | _] = types) do
+    true = Enum.all?(types, &(&1 in @content_codings))
+    %{request | compression: type, accept_encodings: types}
   end
 
   @doc """

@@ -1,6 +1,12 @@
 defmodule CurlReq do
   @req_version :application.get_key(:req, :vsn) |> elem(1)
 
+  # Depends on the Req and OTP version (e.g. "gzip" or "zstd, gzip")
+  @req_accept_encoding Req.new(compressed: true)
+                       |> Req.Steps.compressed()
+                       |> Req.Request.get_header("accept-encoding")
+                       |> Enum.join(", ")
+
   @flag_docs CurlReq.Curl.flags()
              |> Enum.map(fn
                {long, nil} -> "* `--#{long}`"
@@ -95,7 +101,7 @@ defmodule CurlReq do
 
       iex> Req.new(url: URI.parse("https://www.example.com"), compressed: true)
       ...> |> CurlReq.to_curl(flags: :long, flavor: :req)
-      ~S(curl --header "accept-encoding: gzip" --user-agent "req/#{@req_version}" --request GET https://www.example.com)
+      ~S(curl --header "accept-encoding: #{@req_accept_encoding}" --user-agent "req/#{@req_version}" --request GET https://www.example.com)
 
       iex> Req.new(url: "https://www.example.com")
       ...> |> CurlReq.to_curl(run_steps: [except: [:compressed]])

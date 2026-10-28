@@ -120,7 +120,9 @@ defmodule CurlReqTest do
     end
 
     test "req flavor with explicit headers" do
-      assert ~s|curl -H "accept-encoding: gzip" -A "req/#{req_version()}" -X GET https://example.com| ==
+      accept_encoding = req_accept_encoding()
+
+      assert ~s|curl -H "accept-encoding: #{accept_encoding}" -A "req/#{req_version()}" -X GET https://example.com| ==
                Req.new(url: "https://example.com", compressed: true)
                |> CurlReq.to_curl(flavor: :req)
     end
@@ -621,5 +623,14 @@ defmodule CurlReqTest do
         CurlReq.Curl.decode(~s(curl --foo https://example.com))
       end
     end
+  end
+
+  # The accept-encoding Req sends for `compressed: true` differs by Req and OTP version
+  # (e.g. "gzip" or "zstd, gzip"), so ask Req instead of hardcoding it.
+  defp req_accept_encoding do
+    Req.new(compressed: true)
+    |> Req.Steps.compressed()
+    |> Req.Request.get_header("accept-encoding")
+    |> Enum.join(", ")
   end
 end
